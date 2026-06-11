@@ -15,8 +15,7 @@ module control_unit #(parameter freq = 100) (
     input  wire        frontend_idle_safe,
     
     // PT: Saídas Físicas (Chip Pins) | EN: Physical Outputs (Chip Pins)
-    output wire CKE, RESET_n,
-    output wire CS_out, RAS_out, CAS_out, WE_out,
+    output wire CS_out, RAS_out, CAS_out, WE_out, RESET_n,
     output wire [12:0] A_out,
     output wire [2:0] BA_out,
     
@@ -26,7 +25,7 @@ module control_unit #(parameter freq = 100) (
     output wire [12:0] MR0, MR1, MR2, MR3
 );
 
-    wire CS_init, RAS_init, CAS_init, WE_init;
+    wire CS_init, RAS_init, CAS_init, WE_init, CKE;
     wire [2:0]  BA_init;
     wire [12:0] A_init;
     wire refresh_ack, refresh_req, inject_refresh;

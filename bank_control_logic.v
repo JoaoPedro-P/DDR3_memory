@@ -1,27 +1,53 @@
 /*
  * module: dram_bank_control
  * -----------------
- * PT: Controlador de Bancos da DRAM. 
- *     Gerencia as máquinas de estado individuais para cada banco e detecta violações de timing.
+ * PT: Controlador de Estado dos Bancos DRAM. 
+ *     Este módulo é responsável por monitorar o estado individual de cada um dos 8 
+ *     bancos da memória e garantir que as restrições de tempo JEDEC sejam respeitadas.
+ *     Ele atua como um "vigilante" de protocolo, detectando tentativas de acesso 
+ *     ilegais (ex: ler de um banco fechado) e gerenciando os timers tRCD e tRP.
  * 
- * EN: DRAM Bank Control.
- *     Manages individual state machines for each bank and detects timing violations.
+ *     Estados do Banco:
+ *     - IDLE: Banco fechado. Precisa de ACT para abrir.
+ *     - ACTIVATING: Transição de abertura. Timer tRCD em progresso.
+ *     - ACTIVE: Banco aberto (Página aberta). Pronto para comandos RD/WR.
+ *     - PRECHARGING: Transição de fechamento. Timer tRP em progresso.
+ *
+ * EN: DRAM Bank State Controller.
+ *     This module is responsible for monitoring the individual state of each of 
+ *     the 8 memory banks and ensuring that JEDEC timing constraints are met.
+ *     It acts as a protocol "watchdog", detecting illegal access attempts 
+ *     (e.g., reading from a closed bank) and managing tRCD and tRP timers.
+ * 
+ *     Bank States:
+ *     - IDLE: Bank closed. Needs ACT to open.
+ *     - ACTIVATING: Opening transition. tRCD timer in progress.
+ *     - ACTIVE: Bank open (Open Page). Ready for RD/WR commands.
+ *     - PRECHARGING: Closing transition. tRP timer in progress.
  */
 module dram_bank_control #(
-    parameter freq = 100,
-    parameter T_RCD_CYCLES = 5, 
-    parameter T_RP_CYCLES  = 5
+    parameter freq = 100,            // PT: Freq. de clock. | EN: Clock freq.
+    parameter T_RCD_CYCLES = 5,      // PT: Ciclos para tRCD (ACT -> RD/WR). | EN: Cycles for tRCD.
+    parameter T_RP_CYCLES  = 5       // PT: Ciclos para tRP (PRE -> IDLE). | EN: Cycles for tRP.
 )(
-    input  wire       clk, 
-    input  wire       rst_n, 
-    input  wire       act_cmd, 
-    input  wire       pre_cmd, 
-    input  wire       rd_cmd, 
-    input  wire       wr_cmd,
-    input  wire [2:0] bank_addr,
-    output reg  [7:0] bank_active,
-    output reg        timing_error
+    // =========================================================================
+    // Sinais de Controle | Control Signals
+    // =========================================================================
+    input  wire       clk,           // PT: Clock principal. | EN: Main clock.
+    input  wire       rst_n,         // PT: Reset (Ativo Baixo). | EN: Reset (Active Low).
+    input  wire       act_cmd,       // PT: Comando ACTIVATE detectado. | EN: ACTIVATE command.
+    input  wire       pre_cmd,       // PT: Comando PRECHARGE detectado. | EN: PRECHARGE command.
+    input  wire       rd_cmd,        // PT: Comando READ detectado. | EN: READ command.
+    input  wire       wr_cmd,        // PT: Comando WRITE detectado. | EN: WRITE command.
+    input  wire [2:0] bank_addr,     // PT: Banco alvo do comando. | EN: Target bank.
+    
+    // =========================================================================
+    // Status de Saída | Output Status
+    // =========================================================================
+    output reg  [7:0] bank_active,   // PT: Bitmask de bancos abertos (1=Aberto). | EN: Active bank bitmask.
+    output reg        timing_error   // PT: Flag de erro de timing/protocolo. | EN: Timing error flag.
 );
+
 
     // PT: 8 máquinas de estado (uma por banco) | EN: 8 state machines (one per bank)
     reg [1:0] state [0:7];

@@ -39,7 +39,8 @@ module tb_ddr_mem;
     reg         cpu_wr_en;
     reg  [15:0] cpu_wdata;
     wire [15:0] cpu_rdata;
-	reg         cpu_rd_en;
+	 reg  [1:0]  cpu_wstrb;
+	 reg         cpu_rd_en;
     
     // PT: Sinais de Status Internos | EN: Internal Status Signals
     wire        init_done;
@@ -70,7 +71,8 @@ module tb_ddr_mem;
         .cpu_rnw    (cpu_rnw),
         .cpu_addr   (cpu_addr),
         .cpu_ready  (cpu_ready),
-        
+        .cpu_wstrb  (cpu_wstrb),
+		  
         .init_done  (init_done),
         .tx_full    (tx_full),
         .tx_empty   (tx_empty),
@@ -123,22 +125,21 @@ module tb_ddr_mem;
                 @(posedge cpu_clk);
             end
             
-            // 3) PT: Envia dados para a TX FIFO | EN: Push data to TX FIFO
-            cpu_req   = 1'b0; 
-            
-            cpu_wr_en = 1'b1; cpu_wdata = data_in[63:48];
+			  // 3) PT: Envia dados para a TX FIFO | EN: Push data to TX FIFO
+            cpu_req   = 1'b0;
+            cpu_wr_en = 1'b1; cpu_wdata = data_in[63:48]; cpu_wstrb = 2'b11; // <--- Strobe em ALTO
             @(posedge cpu_clk);
             
-            cpu_wr_en = 1'b1; cpu_wdata = data_in[47:32];
+            cpu_wr_en = 1'b1; cpu_wdata = data_in[47:32]; cpu_wstrb = 2'b11; // <--- Strobe em ALTO
             @(posedge cpu_clk);
             
-            cpu_wr_en = 1'b1; cpu_wdata = data_in[31:16];
+            cpu_wr_en = 1'b1; cpu_wdata = data_in[31:16]; cpu_wstrb = 2'b11; // <--- Strobe em ALTO
             @(posedge cpu_clk);
             
-            cpu_wr_en = 1'b1; cpu_wdata = data_in[15:0];
+            cpu_wr_en = 1'b1; cpu_wdata = data_in[15:0];  cpu_wstrb = 2'b11; // <--- Strobe em ALTO
             @(posedge cpu_clk);
             
-            cpu_wr_en = 1'b0;
+            cpu_wr_en = 1'b0; cpu_wstrb = 2'b00; // <--- Limpa o strobe ao terminar
             
             // PT: Atraso tWTR para estabilização | EN: tWTR delay for stability
             repeat(40) @(posedge clk);
@@ -197,7 +198,7 @@ module tb_ddr_mem;
         cpu_wr_en = 0; 
         cpu_wdata = 0;
 		cpu_rd_en = 0;
-
+	cpu_wstrb = 0;
         #100;
         rst_n     = 1;
         cpu_rst_n = 1;

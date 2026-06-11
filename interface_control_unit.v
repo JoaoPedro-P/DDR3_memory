@@ -1,22 +1,60 @@
 /*
  * module: interface_control_unit
  * -----------------
- * PT: Unidade de Interface de Controle. 
- *     Gerencia a tradução de endereços da CPU e o rastreamento de páginas (Open/Closed).
+ * PT: Unidade de Controle de Interface (Frontend). 
+ *     Este módulo é a porta de entrada para os comandos da CPU/AXI. Ele traduz 
+ *     endereços lógicos em endereços físicos de DRAM e decide quais comandos 
+ *     JEDEC (ACT, RD, WR, PRE) devem ser enviados ao backend.
  * 
- * EN: Interface Control Unit.
- *     Manages CPU address translation and page tracking (Open/Closed policy).
+ *     Responsabilidades:
+ *     1. Decodificação de Endereço: Mapeia o endereço de 27 bits da CPU em 
+ *        Bank (3 bits), Row (14 bits) e Column (10 bits).
+ *     2. Política de Página Aberta: Em conjunto com o row_tracker, determina 
+ *        se o acesso é um Hit (mesma linha aberta), Miss (linha diferente 
+ *        aberta) ou Empty (nenhuma linha aberta).
+ *     3. Árbitro de Comandos: Coordena o handshake com a FIFO de comandos e 
+ *        sinaliza para o mem_controller quando disparar operações.
+ *
+ * EN: Interface Control Unit (Frontend).
+ *     This module is the gateway for CPU/AXI commands. It translates logical 
+ *     addresses into physical DRAM addresses and decides which JEDEC 
+ *     commands (ACT, RD, WR, PRE) should be sent to the backend.
+ * 
+ *     Responsibilities:
+ *     1. Address Decoding: Maps the 27-bit CPU address into Bank (3 bits), 
+ *        Row (14 bits), and Column (10 bits).
+ *     2. Open-Page Policy: Working with the row_tracker, it determines 
+ *        if an access is a Hit (same row open), Miss (different row open), 
+ *        or Empty (no row open).
+ *     3. Command Arbiter: Coordinates the handshake with the command FIFO 
+ *        and signals the mem_controller when to trigger operations.
  */
 module interface_control_unit(
-    input  wire        clk, rst_n, cpu_req, cpu_rnw, init_done,
-    input  wire [26:0] cpu_address,
-    input  wire [7:0]  cpu_active_flag, cpu_idle_flag,
-    output wire [13:0] row_addr,
-    output wire [9:0]  col_addr,
-    output wire [2:0]  bank_addr,
-    output wire        cpu_ready, CS, RAS, WE, CAS,
-	output wire        cmd_ack // PT: Reconhecimento de comando da FIFO | EN: FIFO command acknowledgment
+    // =========================================================================
+    // Clocks e Controle | Clocks and Control
+    // =========================================================================
+    input  wire        clk,             // PT: Clock da memória. | EN: Memory clock.
+    input  wire        rst_n,           // PT: Reset (Ativo Baixo). | EN: Reset (Active Low).
+    input  wire        cpu_req,         // PT: Requisição pendente na FIFO. | EN: Pending request.
+    input  wire        cpu_rnw,         // PT: 1=Read, 0=Write. | EN: 1=Read, 0=Write.
+    input  wire        init_done,       // PT: Indica boot concluído. | EN: Boot finished.
+    input  wire [26:0] cpu_address,     // PT: Endereço lógico (27-bits). | EN: Logical address.
+    
+    // PT: Sinais de Status dos Bancos | EN: Bank Status Signals
+    input  wire [7:0]  cpu_active_flag, // PT: Bancos com página aberta. | EN: Active banks.
+    input  wire [7:0]  cpu_idle_flag,   // PT: Bancos sem página aberta. | EN: Idle banks.
+    
+    // PT: Saídas de Endereço Traduzido | EN: Translated Address Outputs
+    output wire [13:0] row_addr,        // PT: Endereço de linha (14 bits). | EN: Row address.
+    output wire [9:0]  col_addr,        // PT: Endereço de coluna (10 bits). | EN: Column address.
+    output wire [2:0]  bank_addr,       // PT: Endereço de banco (3 bits). | EN: Bank address.
+    
+    // PT: Sinais p/ mem_controller | EN: Signals for mem_controller
+    output wire        cpu_ready,       // PT: Frontend pronto p/ próximo comando. | EN: Frontend ready.
+    output wire        CS, RAS, WE, CAS,// PT: Comandos JEDEC SDR. | EN: JEDEC SDR commands.
+	 output wire        cmd_ack          // PT: Reconhecimento p/ FIFO (CDC). | EN: Ack for FIFO.
 );
+
     wire page_empty, page_hit, page_miss, update_row_en;
     
     // PT: Lógica de Comunicação (FSM JEDEC) | EN: Communication Logic (JEDEC FSM)

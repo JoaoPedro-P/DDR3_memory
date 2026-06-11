@@ -1,50 +1,91 @@
 /*
  * module: ddr_mem
  * -----------------
- * PT: Módulo principal do sistema de memória DDR3. 
- *     Atua como o Top-Level, instanciando o controlador de memória e o core da DRAM.
- *     Inclui uma camada de sincronização (FIFO Assíncrona) para comunicação com a CPU.
- * 
- * EN: Top-level module of the DDR3 memory system.
- *     It instantiates the memory controller and the DRAM core model.
- *     Includes a Clock Domain Crossing (CDC) layer using an Asynchronous FIFO for CPU communication.
+ * PT: Módulo principal do sistema de memória DDR3. Atua como o "Top-Level" do core da memória, 
+ *     instanciando o controlador JEDEC, a camada física (PHY) e o modelo de armazenamento.
+ *     
+ *     Principais Responsabilidades:
+ *     1. Camada CDC (Clock Domain Crossing): Utiliza FIFOs assíncronas para transferir comandos 
+ *        e dados entre o domínio de clock da CPU (cpu_clk) e o domínio da memória (clk).
+ *     2. Interface de Controle: Instancia a interface_control_unit para decodificar requisições 
+ *        e gerenciar a política de página aberta (Open-Page Policy).
+ *     3. Back-end JEDEC: Instancia o mem_controller que gerencia inicialização, refresh e 
+ *        estados dos bancos (FSMs de banco).
+ *     4. Core de Armazenamento: Conecta-se ao dram_bank_array que emula as células de memória, 
+ *        amplificadores de detecção e lógica de máscara.
+ *
+ * EN: Main module of the DDR3 memory system. Acts as the "Top-Level" of the memory core, 
+ *     instantiating the JEDEC controller, the physical layer (PHY), and the storage model.
+ *     
+ *     Key Responsibilities:
+ *     1. CDC (Clock Domain Crossing) Layer: Uses asynchronous FIFOs to transfer commands 
+ *        and data between the CPU clock domain (cpu_clk) and the memory domain (clk).
+ *     2. Control Interface: Instantiates the interface_control_unit to decode requests 
+ *        and manage the Open-Page Policy.
+ *     3. JEDEC Back-end: Instantiates the mem_controller which manages initialization, 
+ *        refresh, and bank states (bank FSMs).
+ *     4. Storage Core: Connects to the dram_bank_array which emulates memory cells, 
+ *        sense amplifiers, and data mask logic.
+ *
+ * Parameters | Parâmetros:
+ *     - freq: PT: Frequência de operação (MHz). Default 100MHz.
+ *             EN: Operating frequency (MHz). Default 100MHz.
  */
 module ddr_mem #(parameter freq = 100) (
     // -------------------------------------------------------------------------
     // PT: Clocks e Resets Globais | EN: Global Clocks and Resets
     // -------------------------------------------------------------------------
-    input  wire        clk,        // PT: Clock do sistema (0°) | EN: System clock (0 degrees)
-    input  wire        clk_90,     // PT: Clock defasado para DQS (90°) | EN: Phase-shifted clock for DQS (90 degrees)
-    input  wire        rst_n,      // PT: Reset principal (Ativo Baixo) | EN: Main reset (Active Low)
-    input  wire        cpu_clk,    // PT: Clock do processador (Domínio externo) | EN: CPU clock (External domain)
-    input  wire        cpu_rst_n,  // PT: Reset do processador | EN: CPU reset
+    input  wire        clk,        // PT: Clock principal do sistema (0°).
+                                   // EN: Main system clock (0 degrees).
+    input  wire        clk_90,     // PT: Clock defasado de 90°. Emula um DLL para centralizar o strobe DQS.
+                                   // EN: 90-degree phase-shifted clock. Emulates a DLL to center the DQS strobe.
+    input  wire        rst_n,      // PT: Reset global (Ativo Baixo). Reinicia todo o controlador e core.
+                                   // EN: Global reset (Active Low). Resets the entire controller and core.
+    input  wire        cpu_clk,    // PT: Clock da interface CPU (Ex: barramento AXI).
+                                   // EN: CPU interface clock (e.g., AXI bus).
+    input  wire        cpu_rst_n,  // PT: Reset da interface CPU.
+                                   // EN: CPU interface reset.
 
     // -------------------------------------------------------------------------
     // PT: Interface de Controle CPU | EN: High-Level CPU Control Interface
     // -------------------------------------------------------------------------
-    input  wire        cpu_req,      // PT: CPU solicita operação | EN: CPU requests an operation
-    input  wire        cpu_rnw,      // PT: 1 = Leitura, 0 = Escrita | EN: 1 = Read, 0 = Write
-    input  wire [26:0] cpu_addr,     // PT: Endereço completo (27 bits) | EN: Full address sent by CPU
-    output wire        cpu_ready,    // PT: Handshake: Controlador pronto | EN: Handshake: Controller is ready
+    input  wire        cpu_req,      // PT: Solicitação de operação. Pulso indica novo comando.
+                                     // EN: Operation request. Pulse indicates a new command.
+    input  wire        cpu_rnw,      // PT: Direção: 1 = Leitura (Read), 0 = Escrita (Write).
+                                     // EN: Direction: 1 = Read, 0 = Write.
+    input  wire [26:0] cpu_addr,     // PT: Endereço completo (27 bits). Mapeado em {Banco, Linha, Coluna}.
+                                     // EN: Full address (27 bits). Mapped as {Bank, Row, Column}.
+    output wire        cpu_ready,    // PT: Handshake: Indica que a FIFO de comandos pode aceitar novas requisições.
+                                     // EN: Handshake: Indicates command FIFO can accept new requests.
     
     // PT: Sinais de Status | EN: System Status Signals
-    output wire        init_done,    // PT: Inicialização concluída | EN: Initialization finished
-    output wire        tx_full,      // PT: Fila de transmissão cheia | EN: TX FIFO is full
-    output wire        tx_empty,     // PT: Fila de transmissão vazia | EN: TX FIFO is empty
-    output wire        rx_valid,     // PT: Dados de leitura válidos | EN: Valid read data available
+    output wire        init_done,    // PT: Indica que a sequência de calibração JEDEC foi concluída com sucesso.
+                                     // EN: Indicates JEDEC calibration sequence finished successfully.
+    output wire        tx_full,      // PT: Indica que a FIFO de transmissão de dados de escrita está cheia.
+                                     // EN: Indicates write data TX FIFO is full.
+    output wire        tx_empty,     // PT: Indica que a FIFO de transmissão de dados de escrita está vazia.
+                                     // EN: Indicates write data TX FIFO is empty.
+    output wire        rx_valid,     // PT: Indica que há dados de leitura válidos na saída cpu_rdata.
+                                     // EN: Indicates valid read data is available on cpu_rdata.
 
     // -------------------------------------------------------------------------
     // PT: Interface de Dados CPU | EN: CPU Data Interface (Write/Read Bus)
     // -------------------------------------------------------------------------
-    input  wire        cpu_wr_en,    // PT: Habilita escrita na FIFO | EN: Enable write to TX FIFO
-    input  wire [15:0] cpu_wdata,    // PT: Dados de escrita da CPU | EN: Write data from CPU
-    output wire [15:0] cpu_rdata     // PT: Dados lidos para a CPU | EN: Read data to CPU
+    input  wire        cpu_wr_en,    // PT: Habilita a escrita de um dado de 16 bits na FIFO TX.
+                                     // EN: Enables writing 16-bit data into the TX FIFO.
+    input  wire [15:0] cpu_wdata,    // PT: Barramento de dados de escrita vindo da CPU.
+                                     // EN: Write data bus coming from CPU.
+	 input  wire [1:0]  cpu_wstrb,   // PT: Máscara de bytes (Data Mask). Simplificação do modelo analógico.
+	                                 // EN: Byte mask (Data Mask). Simplification of the analog model.
+    output wire [15:0] cpu_rdata     // PT: Barramento de dados lidos entregues para a CPU.
+                                     // EN: Read data bus delivered to CPU.
 );
+
 
     // =========================================================================
     // PT: SINAIS INTERNOS DE ROTEAMENTO | EN: INTERNAL ROUTING SIGNALS
     // =========================================================================
-    wire        int_CS, int_RAS, int_CAS, int_WE;
+    wire        int_CS, int_RAS, int_CAS, int_WE, RESET_n_pad, DM;
     wire [13:0] int_row_addr;
     wire [9:0]  int_col_addr;
     wire [2:0]  int_bank_addr;
@@ -132,7 +173,7 @@ module ddr_mem #(parameter freq = 100) (
     // =========================================================================
     // PT: BARRAMENTOS FÍSICOS DA PLACA | EN: PHYSICAL BOARD BUSES (PHY PADS)
     // =========================================================================
-    wire        CKE_pad, RESET_n_pad;
+    
     wire        CS_n_pad, RAS_n_pad, CAS_n_pad, WE_n_pad;
     wire [12:0] A_pad;
     wire [2:0]  BA_pad;
@@ -169,16 +210,15 @@ module ddr_mem #(parameter freq = 100) (
         .bank_active_flag(int_bank_active_flag), 
         .bank_idle_flag(int_bank_idle_flag),     
         .MR0(), .MR1(), .MR2(), .MR3(),
-        
+        .cpu_wstrb(cpu_wstrb),
         .cpu_wr_en(cpu_wr_en),
         .cpu_wdata(cpu_wdata),
         .tx_full(tx_full),
         .tx_empty(tx_empty),
         .cpu_rdata(cpu_rdata),
         .rx_valid(rx_valid),
-        
-        .CKE(CKE_pad), 
         .RESET_n(RESET_n_pad),
+
         .CS_out(CS_n_pad), 
         .RAS_out(RAS_n_pad), 
         .CAS_out(CAS_n_pad), 
@@ -189,7 +229,8 @@ module ddr_mem #(parameter freq = 100) (
         
         .DQ(DQ_bus),
         .DQS(DQS_bus), 
-        .DQS_n(DQS_n_bus)
+        .DQS_n(DQS_n_bus),
+		  .DM(DM)
     );
 
     // =========================================================================
@@ -223,7 +264,7 @@ module ddr_mem #(parameter freq = 100) (
         .DQ(DQ_bus),
         .DQS(DQS_bus),
         .DQS_n(DQS_n_bus),
-        .DM(1'b0) 
+        .DM(DM) 
     );
 
     // =========================================================================

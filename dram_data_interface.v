@@ -49,31 +49,31 @@ module dram_data_interface (
     end
 
     reg [3:0] wr_cnt;
-    always @(posedge clk or negedge rst_n) begin
+always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             wr_cnt       <= 4'd0;
             data_to_core <= 64'd0;
             dm_to_core   <= 8'd0;
         end else begin
-            if (wr_cmd) begin
+            // Se o contador chegou em 7, DEVE salvar o dado obrigatoriamente
+            if (wr_cnt == 4'd7) begin
+                data_to_core <= {shift_fall[7:0], shift_rise[7:0],
+                                 shift_fall[15:8], shift_rise[15:8],
+                                 shift_fall[23:16], shift_rise[23:16],
+                                 shift_fall[31:24], shift_rise[31:24]};
+                dm_to_core   <= {shift_dm_fall[0], shift_dm_rise[0],
+                                 shift_dm_fall[1], shift_dm_rise[1],
+                                 shift_dm_fall[2], shift_dm_rise[2],
+                                 shift_dm_fall[3], shift_dm_rise[3]};
+                
+                // Se um novo comando colidir neste ciclo, já reinicia a contagem
+                if (wr_cmd) wr_cnt <= 4'd1;
+                else        wr_cnt <= 4'd0;
+                
+            end else if (wr_cmd) begin
                 wr_cnt <= 4'd1;
             end else if (wr_cnt > 0) begin
-                if (wr_cnt == 4'd7) begin
-                    // PT: Reorganiza os dados capturados para o Core (SDR)
-                    // EN: Reorganize captured data for Core (SDR)
-                    data_to_core <= {shift_fall[7:0], shift_rise[7:0],
-                                     shift_fall[15:8], shift_rise[15:8],
-                                     shift_fall[23:16], shift_rise[23:16],
-                                     shift_fall[31:24], shift_rise[31:24]};
-
-                    dm_to_core   <= {shift_dm_fall[0], shift_dm_rise[0],
-                                     shift_dm_fall[1], shift_dm_rise[1],
-                                     shift_dm_fall[2], shift_dm_rise[2],
-                                     shift_dm_fall[3], shift_dm_rise[3]};
-                    wr_cnt <= 4'd0;
-                end else begin
-                    wr_cnt <= wr_cnt + 4'd1;
-                end
+                wr_cnt <= wr_cnt + 4'd1;
             end
         end
     end

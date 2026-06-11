@@ -1,38 +1,71 @@
 /*
  * module: datapath_control_logic
  * -----------------
- * PT: Lógica de Controle do Datapath (Backend Scheduler). 
- *     Esta é a FSM principal que gerencia o estado de cada um dos 8 bancos da memória.
- *     Controla temporizações de JEDEC (tRCD, tRP, tRFC), burst timers e requisições de Refresh.
+ * PT: Lógica de Controle do Datapath (Agendador de Backend). 
+ *     Este módulo é o cérebro JEDEC do controlador. Ele gerencia as máquinas de estado 
+ *     individuais para cada um dos 8 bancos da memória DDR3, garantindo que os comandos 
+ *     enviados à DRAM respeitem rigorosamente os tempos de protocolo (tRCD, tRP, tRFC).
  * 
+ *     Principais Funções:
+ *     1. Decodificação JEDEC: Converte sinais genéricos em comandos DDR3 (ACT, RD, WR, etc).
+ *     2. Máquinas de Estado de Banco: 8 FSMs paralelas que rastreiam se um banco está 
+ *        IDLE, ATIVANDO, ATIVO, LENDO, ESCREVENDO ou em PRECHARGE.
+ *     3. Gerenciamento de Burst: Controla a duração das transferências de dados.
+ *     4. Refresh Automático: Prioriza e injeta comandos de Refresh para manter a 
+ *        integridade dos dados nas células capacitivas.
+ *     5. Registradores de Modo (MR): Armazena as configurações de latência e burst.
+ *
  * EN: Datapath Control Logic (Backend Scheduler).
- *     This is the main FSM that manages the state for each of the 8 memory banks.
- *     Controls JEDEC timings (tRCD, tRP, tRFC), burst timers, and Refresh requests.
+ *     This module is the JEDEC brain of the controller. It manages individual state 
+ *     machines for each of the 8 DDR3 memory banks, ensuring that commands sent to 
+ *     the DRAM strictly respect protocol timings (tRCD, tRP, tRFC).
+ * 
+ *     Key Functions:
+ *     1. JEDEC Decoding: Converts generic signals into DDR3 commands (ACT, RD, WR, etc).
+ *     2. Bank State Machines: 8 parallel FSMs that track if a bank is IDLE, 
+ *        ACTIVATING, ACTIVE, READING, WRITING, or in PRECHARGE.
+ *     3. Burst Management: Controls the duration of data transfers.
+ *     4. Automatic Refresh: Prioritizes and injects Refresh commands to maintain 
+ *        data integrity in the capacitive cells.
+ *     5. Mode Registers (MR): Stores latency and burst settings.
  */
 module datapath_control_logic #(parameter freq = 100) (
     // PT: Sinais de Clock e Controle | EN: Clock and Control Signals
-    input  wire        CK, CKE, RESET_n, CS_n, A12, A10, RAS_n, CAS_n, WE_n, 
-    input  wire        refresh_req,
-    input  wire [12:0] A,
-    input  wire [2:0]  BA,
-	input  wire        frontend_idle_safe, // PT: Frontend pronto para Refresh | EN: Frontend ready for Refresh
+    input  wire        CK,           // PT: Clock da memória (0°). | EN: Memory clock (0°).
+    input  wire        CKE,          // PT: Clock Enable da DRAM. | EN: DRAM Clock Enable.
+    input  wire        RESET_n,      // PT: Reset (Ativo Baixo). | EN: Reset (Active Low).
+    input  wire        CS_n,         // PT: Chip Select (Ativo Baixo). | EN: Chip Select (Active Low).
+    input  wire        A12,          // PT: Endereço A12 (Burst Chop select). | EN: Address A12 (BC select).
+    input  wire        A10,          // PT: Endereço A10 (Auto-Precharge select). | EN: Address A10 (AP select).
+    input  wire        RAS_n,        // PT: Row Address Strobe (Ativo Baixo). | EN: Row Address Strobe.
+    input  wire        CAS_n,        // PT: Column Address Strobe (Ativo Baixo). | EN: Column Address Strobe.
+    input  wire        WE_n,         // PT: Write Enable (Ativo Baixo). | EN: Write Enable.
+    input  wire        refresh_req,  // PT: Solicitação de Refresh pendente. | EN: Pending Refresh request.
+    input  wire [12:0] A,            // PT: Barramento de endereço JEDEC. | EN: JEDEC address bus.
+    input  wire [2:0]  BA,           // PT: Barramento de endereço de banco. | EN: Bank address bus.
+	 input  wire        frontend_idle_safe, // PT: Indica que o frontend está ocioso p/ Refresh.
+	                                       // EN: Indicates frontend is idle for Refresh.
     
-    // PT: Sinais de Habilitação | EN: Enable Signals
-    output reg         enable_read_fifo, 
-    output reg         enable_write_drivers, 
-    output reg         enable_row_decoder, 
+    // PT: Sinais de Habilitação (PHY/Data) | EN: Enable Signals (PHY/Data)
+    output reg         enable_read_fifo,      // PT: Habilita leitura da FIFO de retorno. | EN: Enable read FIFO.
+    output reg         enable_write_drivers,  // PT: Habilita drivers de escrita DQ. | EN: Enable write drivers.
+    output reg         enable_row_decoder,    // PT: Habilita decodificador de linha. | EN: Enable row decoder.
     
     // PT: Controle de Refresh | EN: Refresh Control
-    output reg         refresh_ack, 
-    output reg         refresh_mem_flag, 
-    output reg         inject_refresh,
+    output reg         refresh_ack,           // PT: Confirma execução do Refresh. | EN: Ack Refresh execution.
+    output reg         refresh_mem_flag,      // PT: Indica que a memória está em ciclo de Refresh. | EN: Refresh in progress.
+    output reg         inject_refresh,        // PT: Pulso para injetar comando REF físico. | EN: Pulse to inject physical REF.
     
     // PT: Flags de Status | EN: Status Flags
-    output reg  [7:0]  BC4_flag, AP_flag, bank_active_flag, bank_idle_flag,
+    output reg  [7:0]  BC4_flag,              // PT: Flag de Burst Chop (4 palavras) por banco. | EN: BC4 flag per bank.
+    output reg  [7:0]  AP_flag,               // PT: Flag de Auto-Precharge por banco. | EN: AP flag per bank.
+    output reg  [7:0]  bank_active_flag,      // PT: Banco está com linha ativa. | EN: Bank is active.
+    output reg  [7:0]  bank_idle_flag,        // PT: Banco está em IDLE (fechado). | EN: Bank is idle.
     
     // PT: Registradores de Modo | EN: Mode Registers
-    output reg  [12:0] MR0, MR1, MR2, MR3
+    output reg  [12:0] MR0, MR1, MR2, MR3     // PT: Conteúdo dos registradores de configuração. | EN: MR contents.
 );
+
 	localparam [$clog2(freq) + 1 : 0] T_RC_VAL = (freq / 67) + 1;
 	localparam tRFC_ns = 110; 
     localparam tRFC_cycles = (tRFC_ns * freq) / 1000;

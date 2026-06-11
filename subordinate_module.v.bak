@@ -1,0 +1,132 @@
+module subordinate_module #(parameter freq = 100) (
+    // =========================================================================
+    // Clocks e Resets
+    // =========================================================================
+    input  wire        ACLK,       // Clock AXI (Conectado ao cpu_clk do sistema)
+    input  wire        ARESETn,    // Reset AXI ativo baixo (Conectado ao cpu_rst_n)
+	 input  wire		  clk,        // Clock da memória
+	 input  wire 		  clk_90,     // Clock da memória defasado de 90°
+	 input  wire        rst_n,      // Reset da memória
+    // =========================================================================
+    // Interface AXI-Lite (Lado Mestre/CPU)
+    // =========================================================================
+    
+    // Canal de Endereço de Escrita (AW)
+    input  wire [26:0] AWADDR,
+    input  wire        AWVALID,
+    output wire        AWREADY,
+
+    // Canal de Dados de Escrita (W)
+    input  wire [15:0] WDATA,
+    input  wire        WVALID,
+    output wire        WREADY,
+
+    // Canal de Resposta de Escrita (B)
+    output wire [1:0]  BRESP,
+    output wire        BVALID,
+    input  wire        BREADY,
+
+    // Canal de Endereço de Leitura (AR)
+    input  wire [26:0] ARADDR,
+    input  wire        ARVALID,
+    output wire        ARREADY,
+
+    // Canal de Dados de Leitura (R)
+    output wire [15:0] RDATA,
+    output wire [1:0]  RRESP,
+    output wire        RVALID,
+    input  wire        RREADY,
+
+);
+
+ wire  cpu_req, cpu_rnw, cpu_wr_en, cpu_ready, rx_valid, tx_full, init_done;
+ wire [26:0] cpu_addr;
+ wire [15:0] cpu_wdata;
+ wire [15:0] cpu_rdata;
+
+axi_controller axi_inst (
+    // =========================================================================
+    // Clocks e Resets
+    // =========================================================================
+    .ACLK(ACLK),
+    .ARESETn(ARESETn),
+
+    // =========================================================================
+    // Interface AXI-Lite (Lado Mestre/CPU)
+    // =========================================================================
+    
+    // Canal de Endereço de Escrita (AW)
+    .AWADDR(AWADDR),
+    .AWVALID(AWVALID),
+    .AWREADY(AWREADY),
+
+    // Canal de Dados de Escrita (W)
+    .WDATA(WDATA),
+    .WVALID(WVALID),
+    .WREADY(WREADY),
+
+    // Canal de Resposta de Escrita (B)
+    .BRESP(BRESP),
+    .BVALID(BVALID),
+    .BREADY(BREADY),
+
+    // Canal de Endereço de Leitura (AR)
+    .ARADDR(ARADDR),
+    .ARVALID(ARVALID),
+    .ARREADY(ARREADY),
+
+    // Canal de Dados de Leitura (R)
+    .RDATA(RDATA),
+    .RRESP(RRESP),
+    .RVALID(RVALID),
+    .RREADY(RREADY),
+
+    // =========================================================================
+    // Interface Customizada (Lado Escravo/Memória DDR3)
+    // =========================================================================
+    .cpu_req(cpu_req),
+    .cpu_rnw(cpu_rnw),
+    .cpu_addr(cpu_addr),
+    .cpu_wr_en(cpu_wr_en),
+	 .init_done(init_done),
+    .cpu_wdata(cpu_wdata),
+    .cpu_rdata(cpu_rdata),
+    .cpu_ready(cpu_ready),
+    .rx_valid(rx_valid),
+    .tx_full(tx_full)
+);
+
+
+ddr_mem #(.freq(freq)) mem_inst (
+    // -------------------------------------------------------------------------
+    // PT: Clocks e Resets Globais | EN: Global Clocks and Resets
+    // -------------------------------------------------------------------------
+    .clk(clk),           			  // PT: Clock do sistema (0°) | EN: System clock (0 degrees)
+    .clk_90(clk_90),     			  // PT: Clock defasado para DQS (90°) | EN: Phase-shifted clock for DQS (90 degrees)
+    .rst_n(rst_n),      			  // PT: Reset principal (Ativo Baixo) | EN: Main reset (Active Low)
+    .cpu_clk(ACLK),    			     // PT: Clock do processador (Domínio externo) | EN: CPU clock (External domain)
+    .cpu_rst_n(ARESETn),  			  // PT: Reset do processador | EN: CPU reset
+
+    // -------------------------------------------------------------------------
+    // PT: Interface de Controle CPU | EN: High-Level CPU Control Interface
+    // -------------------------------------------------------------------------
+    .cpu_req(cpu_req),        // PT: CPU solicita operação | EN: CPU requests an operation
+    .cpu_rnw(cpu_rnw),        // PT: 1 = Leitura, 0 = Escrita | EN: 1 = Read, 0 = Write
+    .cpu_addr(cpu_addr),      // PT: Endereço completo (27 bits) | EN: Full address sent by CPU
+    .cpu_ready(cpu_ready),    // PT: Handshake: Controlador pronto | EN: Handshake: Controller is ready
+    
+    // PT: Sinais de Status | EN: System Status Signals
+    .init_done(init_done),    // PT: Inicialização concluída | EN: Initialization finished
+    .tx_full(tx_full),        // PT: Fila de transmissão cheia | EN: TX FIFO is full
+    .tx_empty(),	            // PT: Fila de transmissão vazia | EN: TX FIFO is empty
+    .rx_valid(rx_valid),      // PT: Dados de leitura válidos | EN: Valid read data available
+
+    // -------------------------------------------------------------------------
+    // PT: Interface de Dados CPU | EN: CPU Data Interface (Write/Read Bus)
+    // -------------------------------------------------------------------------
+    .cpu_wr_en(cpu_wr_en),    // PT: Habilita escrita na FIFO | EN: Enable write to TX FIFO
+    .cpu_wdata(cpu_wdata),    // PT: Dados de escrita da CPU | EN: Write data from CPU
+    .cpu_rdata(cpu_rdata)     // PT: Dados lidos para a CP
+);
+
+endmodule

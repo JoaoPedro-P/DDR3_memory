@@ -26,9 +26,10 @@ module datapath(
     input  wire        cpu_clk,   
     input  wire        cpu_rst_n, 
     input  wire        cpu_wr_en, 
-    input  wire [15:0] cpu_wdata, 
+    input  wire [15:0] cpu_wdata,
+	 input  wire [1:0]  cpu_wstrb,
     output wire        tx_full,   
-	output wire        tx_empty,  
+	 output wire        tx_empty,  
     output wire [15:0] cpu_rdata, 
     output wire        rx_valid,  
 
@@ -38,7 +39,8 @@ module datapath(
     output wire        odt_out,
     inout  wire [7:0]  DQ,
     inout  wire        DQS, 
-    inout  wire        DQS_n
+    inout  wire        DQS_n,
+	 output wire        DM
 );
 
     // PT: Roteamento Interno | EN: Internal Routing
@@ -48,7 +50,8 @@ module datapath(
     
     wire [15:0] internal_tx_data; 
 	 
-	wire [15:0] internal_rx_data;  
+	wire [15:0] internal_rx_data;
+   wire [1:0]  internal_tx_wstrb;	
     wire        internal_rx_valid; 
     wire        rx_fifo_empty;     
 
@@ -81,17 +84,17 @@ module datapath(
     // =========================================================================
     // PT: 3. FIFO de Transmissão | EN: 3. TX FIFO (CPU -> PHY)
     // =========================================================================
-    fifo_async #(.DATA_WIDTH(16), .ADDR_WIDTH(4)) tx_fifo_inst(
+    fifo_async #(.DATA_WIDTH(18), .ADDR_WIDTH(4)) tx_fifo_inst(
         .wr_clk(cpu_clk),
         .wr_rst_n(cpu_rst_n),
         .wr_en(cpu_wr_en),        
-        .wr_data(cpu_wdata),      
+        .wr_data({cpu_wstrb, cpu_wdata}),      
         .full(tx_full),           
 
         .rd_clk(clk),
         .rd_rst_n(rst_n),
         .rd_en(tx_fifo_rd),       
-        .rd_data(internal_tx_data), 
+        .rd_data({internal_tx_wstrb, internal_tx_data}), 
         .empty(tx_empty)
     );
 
@@ -110,10 +113,11 @@ module datapath(
         .tx_data(internal_tx_data), 
         .rx_data(internal_rx_data),   
         .rx_valid(internal_rx_valid), 
-        
+        .tx_wstrb(internal_tx_wstrb),
         .DQ(DQ),
         .DQS(DQS), 
-        .DQS_n(DQS_n)
+        .DQS_n(DQS_n),
+		  .DM(DM)
     );
 
     // =========================================================================
