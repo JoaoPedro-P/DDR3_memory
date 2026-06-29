@@ -272,7 +272,7 @@ module ddr_mem #(parameter freq = 100) (
     // =========================================================================
     dram_bank_array #(
         .freq(freq),
-        .MEM_DEPTH_LOG2(8) 
+        .MEM_DEPTH_LOG2(2) 
     ) dram_core_inst (
         .clk(clk), 
         .rst_n(RESET_n_pad), 

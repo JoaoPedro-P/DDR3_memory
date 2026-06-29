@@ -103,6 +103,14 @@ module inicialization_control_logic #(parameter freq = 100) (
 				CS_n = 1'b1; RAS_n = 1'b1; CAS_n = 1'b1; WE_n = 1'b1; 
                 BA = 3'b000; A = 13'b0;
             end
+				default: begin
+				  RESET_n   = 1'b1;
+				  CKE       = 1'b1;
+				  init_done = 1'b0;
+				  CS_n  = 1'b0; RAS_n = 1'b1; CAS_n = 1'b1; WE_n = 1'b1; // NOP
+				  BA    = 3'b000;
+				  A     = 13'b0;
+				end
         endcase
     end
 

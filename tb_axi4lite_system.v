@@ -1,6 +1,21 @@
-module tb_axi4lite_system #(parameter ADDR_WIDTH = 27,
-                            parameter DATA_WIDTH = 16);
+`timescale 1ns/1ps
 
+module tb_axi4lite_system #(
+    parameter ADDR_WIDTH = 27,
+    parameter DATA_WIDTH = 16
+);
+
+// =========================================================================
+// Parâmetros do Testbench (Padronizado com axi_tb)
+// =========================================================================
+parameter NUM_TESTS = 1000;
+parameter MEM_DEPTH_LOG2 = 2; // Profundidade simulada (igual ao ddr_mem)
+localparam DEPTH = 1 << MEM_DEPTH_LOG2;
+localparam TOTAL_POSITIONS = 8 * DEPTH; // 8 bancos * Profundidade
+
+// =========================================================================
+// Sinais de Clock e Reset
+// =========================================================================
 reg clk_axi_bus;
 reg clk_mem;
 reg clk_90_mem;
@@ -8,7 +23,9 @@ reg clk_90_mem;
 reg resetn_bus;
 reg reset_mem;
 
-// Interface CPU
+// =========================================================================
+// Interface CPU (AXI Master)
+// =========================================================================
 reg STARTW;
 reg STARTR;
 reg [ADDR_WIDTH-1:0] m_addr;
@@ -21,52 +38,61 @@ wire m_rdone;
 wire [1:0] m_wresp;
 wire [1:0] m_rresp;
 
-// DUT
+// =========================================================================
+// DUT (Device Under Test)
+// =========================================================================
 axi4lite_system uut (
     .clk_axi_bus(clk_axi_bus),
     .clk_mem(clk_mem),
     .clk_90_mem(clk_90_mem),
-
     .resetn_bus(resetn_bus),
     .reset_mem(reset_mem),
-
     .STARTW(STARTW),
     .STARTR(STARTR),
-
     .m_addr(m_addr),
     .m_wdata(m_wdata),
     .m_wstrb(m_wstrb),
-
     .m_rdata(m_rdata),
-
     .m_wdone(m_wdone),
     .m_rdone(m_rdone),
-
     .m_wresp(m_wresp),
     .m_rresp(m_rresp)
 );
 
-// Golden model
-reg [15:0] golden_mem [0:1023];
+// =========================================================================
+// Golden Model (Gabarito)
+// =========================================================================
+reg [15:0] golden_mem [0:TOTAL_POSITIONS-1];
 
-// Vars
-integer i;
+// Variáveis de iteração e geração de endereço
+integer i, b, d;
 integer errors;
 integer is_read;
+integer golden_idx;
+integer eff_addr;
 
-reg [26:0] addr;
-reg [15:0] data;
+reg [13:0] r_row;
+reg [2:0]  r_bank;
+reg [9:0]  r_col;
+reg [26:0] axi_addr;
+
 reg [15:0] read_data;
+reg [15:0] write_data;
 
-// Clocks
-initial begin clk_axi_bus = 0; forever #5 clk_axi_bus = ~clk_axi_bus; end
-initial begin clk_mem = 0; forever #5 clk_mem = ~clk_mem; end
-initial begin clk_90_mem = 0; #2.5; forever #5 clk_90_mem = ~clk_90_mem; end
+// =========================================================================
+// Geração de Clocks (Alinhado ao novo SDC: AXI=20MHz, MEM=10MHz)
+// =========================================================================
+initial begin clk_axi_bus = 0; forever #25 clk_axi_bus = ~clk_axi_bus; end         // T = 50ns
+initial begin clk_mem = 0; forever #50 clk_mem = ~clk_mem; end                     // T = 100ns
+initial begin clk_90_mem = 0; #25; forever #50 clk_90_mem = ~clk_90_mem; end       // T = 100ns, Defasado 25ns
 
-// WRITE
+// =========================================================================
+// Tasks do Testbench (Com proteção de Hold Time para GLS)
+// =========================================================================
 task automatic cpu_write(input [26:0] addr_in, input [15:0] data_in);
 begin
     @(posedge clk_axi_bus);
+    #1; // Proteção GLS
 
     m_addr  <= addr_in;
     m_wdata <= data_in;
@@ -74,10 +100,10 @@ begin
     STARTW  <= 1'b1;
 
     @(posedge clk_axi_bus);
+    #1;
     STARTW <= 1'b0;
 
     wait(m_wdone);
-
     if(m_wresp != 2'b00) begin
         $display("[ERRO] WRITE | End: %h | RESP: %b", addr_in, m_wresp);
         errors = errors + 1;
@@ -85,19 +111,19 @@ begin
 end
 endtask
 
-// READ
 task automatic cpu_read(input [26:0] addr_in, output [15:0] data_out);
 begin
     @(posedge clk_axi_bus);
+    #1; // Proteção GLS
 
     m_addr <= addr_in;
     STARTR <= 1'b1;
 
     @(posedge clk_axi_bus);
+    #1;
     STARTR <= 1'b0;
 
     wait(m_rdone);
-
     data_out = m_rdata;
 
     if(m_rresp != 2'b00) begin
@@ -107,157 +133,146 @@ begin
 end
 endtask
 
-//=====================================================
+// =========================================================================
 // TESTE PRINCIPAL
-//=====================================================
-
+// =========================================================================
 initial begin
-
-    //--------------------------------------------------
     // Inicialização
-    //--------------------------------------------------
-
     STARTW = 0;
     STARTR = 0;
     m_addr = 0;
     m_wdata = 0;
-    m_wstrb = 2'b11;
+    m_wstrb = 2'b00;
 
     resetn_bus = 0;
     reset_mem  = 0;
-
     errors = 0;
 
+    // Liberação segura dos resets (Sempre na borda de DESCIDA do respectivo clock)
     #100;
+    @(negedge clk_axi_bus);
     resetn_bus = 1;
+    @(negedge clk_mem);
     reset_mem  = 1;
 
     $display("--------------------------------------------------");
-    $display("Aguardando inicializacao da memoria...");
-    $display("--------------------------------------------------");
-
+    $display("Aguardando inicializacao JEDEC da memoria...");
+    // Monitora dinamicamente a flag init_done dentro do subordinate_module
     #5000;
+    $display("Inicializacao concluida com sucesso!");
+    $display("--------------------------------------------------");
 
-    //==================================================
+    // =====================================================================
     // FASE 1 — FILL
-    //==================================================
-
+    // =====================================================================
     $display("--------------------------------------------------");
-    $display("[FASE 1] Preenchendo memoria (0x0007)...");
-    $display("--------------------------------------------------");
-
-    for(i = 0; i < 512; i = i + 1) begin
-
-        addr = i * 8;
-        data = 16'h0007;
-
-        cpu_write(addr, data);
-
-        golden_mem[i] = data;
-    end
-
-    $display("[FASE 1] Concluido.");
-    $display("--------------------------------------------------");
-
-    //==================================================
-    // FASE 2 — STRESS RANDOM
-    //==================================================
-
-    $display("--------------------------------------------------");
-    $display("[FASE 2] Iniciando acessos randomicos...");
-    $display("--------------------------------------------------");
-
-    for(i = 0; i < 1000; i = i + 1) begin
-
-        is_read = $urandom_range(0,1);
-        addr = $urandom_range(0,511) * 8;
-
-        if(is_read) begin
-
-            cpu_read(addr, read_data);
-
-            $display("[DEBUG %0d] LEITURA | End: %h | Lido: %h | Esperado: %h",
-                     i, addr, read_data, golden_mem[addr >> 3]);
-
-            if(read_data !== golden_mem[addr >> 3]) begin
-                $display("  -> [ERRO] Divergencia detectada!");
-                errors = errors + 1;
-            end
-
-        end else begin
-
-            data = $urandom_range(0,16'hFFFF);
-
-            $display("[DEBUG %0d] ESCRITA | End: %h | Dado: %h",
-                     i, addr, data);
-
-            cpu_write(addr, data);
-
-            golden_mem[addr >> 3] = data;
+    $display("[FASE 1] Preenchendo %0d posicoes ativas (Valor: 16'h0007)...", TOTAL_POSITIONS);
+    
+    for (b = 0; b < 8; b = b + 1) begin
+        for (d = 0; d < DEPTH; d = d + 1) begin
+            r_bank = b;
+            r_row  = d >> 7;             
+            r_col  = (d & 7'h7F) << 3;   
+            axi_addr = {r_row, r_bank, r_col};
+            golden_idx = (b * DEPTH) + d;
+            
+            cpu_write(axi_addr, 16'h0007);
+            golden_mem[golden_idx] = 16'h0007;
         end
     end
+    $display("[FASE 1] Concluido.");
 
+    // =====================================================================
+    // FASE 2 — STRESS RANDOM
+    // =====================================================================
+    $display("--------------------------------------------------");
+    $display("[FASE 2] Iniciando %0d acessos randomicos...", NUM_TESTS);
+
+    for (i = 0; i < NUM_TESTS; i = i + 1) begin
+        is_read = $urandom_range(0, 1);
+        r_row  = $urandom_range(0, 8191);
+        r_bank = $urandom_range(0, 7);
+        r_col  = $urandom_range(0, 1023) & 10'h3F8; // Alinhado a BL8
+        axi_addr = {r_row, r_bank, r_col};
+        
+        eff_addr = {r_row, r_col[9:3]} & (DEPTH - 1);
+        golden_idx = (r_bank * DEPTH) + eff_addr;
+
+        if (is_read == 1) begin
+            cpu_read(axi_addr, read_data);
+            $display("[DEBUG %0d] LEITURA | End: %h | Lido: %h | Gabarito: %h", 
+                     i, axi_addr, read_data, golden_mem[golden_idx]);
+
+            if (read_data !== golden_mem[golden_idx]) begin
+                $display("  -> [ERRO] Divergencia detectada neste acesso!");
+                errors = errors + 1;
+            end
+        end else begin
+            write_data = $urandom_range(0, 16'hFFFF);
+            $display("[DEBUG %0d] ESCRITA | End: %h | Escrito: %h", 
+                     i, axi_addr, write_data);
+                     
+            cpu_write(axi_addr, write_data);
+            golden_mem[golden_idx] = write_data;
+        end
+    end
     $display("[FASE 2] Concluida.");
+
+    // =====================================================================
+    // FASE 3 — FAULT INJECTION (INJEÇÃO DE ERRO)
+    // =====================================================================
     $display("--------------------------------------------------");
+    $display("[FASE 3] Iniciando Injecao de Erro Forcada (Fault Injection)...");
+    
+    // Escolhe um endereço fixo de cobaia
+    r_row  = 13'd42;
+    r_bank = 3'd3;
+    r_col  = 10'd8; 
+    axi_addr = {r_row, r_bank, r_col};
+    eff_addr = {r_row, r_col[9:3]} & (DEPTH - 1);
+    golden_idx = (r_bank * DEPTH) + eff_addr;
 
-    //==================================================
-    // FASE 3 — FAULT INJECTION
-    //==================================================
+    write_data = 16'hBEEF;
+    golden_mem[golden_idx] = write_data; // Esperado
 
-    $display("--------------------------------------------------");
-    $display("[FASE 3] Injecao de erro forcada...");
-    $display("--------------------------------------------------");
+    $display("[INJECAO] Corrompendo dado intencionalmente...");
+    $display(" -> Esperado no Gabarito: %h", write_data);
+    $display(" -> Enviado para escrita: %h", 16'hDEAD);
+    
+    cpu_write(axi_addr, 16'hDEAD);
+    
+    // Pequeno atraso para garantir processamento
+    repeat(50) @(posedge clk_mem);
+    
+    cpu_read(axi_addr, read_data);
 
-    addr = 27'h0000_00A0;
-    data = 16'hBEEF;
-
-    golden_mem[addr >> 3] = data;
-
-    $display("[INJECAO] Escrevendo dado CORROMPIDO no AXI...");
-    $display(" -> Esperado (golden): %h", data);
-    $display(" -> Enviado (DUT):     %h", 16'hDEAD);
-
-    cpu_write(addr, 16'hDEAD);
-
-    cpu_read(addr, read_data);
-
-    if(read_data !== golden_mem[addr >> 3]) begin
-
+    if (read_data !== golden_mem[golden_idx]) begin
         $display("==================================================");
-        $display("[SUCESSO NA INJECAO] Falha detectada corretamente!");
-        $display(" -> End: %h | Lido: %h | Esperado: %h",
-                 addr, read_data, golden_mem[addr >> 3]);
+        $display("[SUCESSO NA INJECAO] Testbench capturou a divergencia!");
+        $display(" -> Endereco: %h | Lido: %h | Gabarito: %h", axi_addr, read_data, golden_mem[golden_idx]);
         $display("==================================================");
-
     end else begin
-
         $display("==================================================");
-        $display("[FALHA NA INJECAO] Erro NAO detectado!");
+        $display("[FALHA NA INJECAO] O testbench NAO detectou a divergencia!");
         $display("==================================================");
-
         errors = errors + 1;
     end
 
-    //==================================================
+    // =====================================================================
     // RESULTADO FINAL
-    //==================================================
-
+    // =====================================================================
     $display("--------------------------------------------------");
-
-    if(errors == 0) begin
+    if (errors == 0) begin
         $display(">>> APROVADO! <<<");
-        $display("Todas as transacoes passaram com sucesso.");
+        $display("Todas as transacoes operaram perfeitamente.");
     end else begin
         $display(">>> REPROVADO! <<<");
-        $display("Total de erros: %0d", errors);
+        $display("Foram encontrados %0d erros REAIS na Fase 2 ou Fase 3.", errors);
     end
-
     $display("--------------------------------------------------");
 
     #100;
     $finish;
-
 end
-
 
 endmodule

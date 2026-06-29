@@ -66,7 +66,7 @@ module datapath_control_logic #(parameter freq = 100) (
     output reg  [12:0] MR0, MR1, MR2, MR3     // PT: Conteúdo dos registradores de configuração. | EN: MR contents.
 );
 
-	localparam [$clog2(freq) + 1 : 0] T_RC_VAL = (freq / 67) + 1;
+	localparam [$clog2(freq) + 9'd1 : 0] T_RC_VAL = (freq / 9'd67) + 9'd1;
 	localparam tRFC_ns = 110; 
     localparam tRFC_cycles = (tRFC_ns * freq) / 1000;
 	 

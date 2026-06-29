@@ -21,6 +21,6 @@ module temp_param #(parameter freq = 100) (
         else if(!start)
             out <= num_cicles; // PT: Carrega valor inicial | EN: Load initial value
         else if (out > 0)
-            out <= out - 1;    // PT: Contagem decrescente | EN: Count down
+            out <= out - 9'd1;    // PT: Contagem decrescente | EN: Count down
     end
 endmodule

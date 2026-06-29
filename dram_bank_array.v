@@ -121,7 +121,7 @@ module dram_bank_array #(
 
             // 3. PT: Execução da Escrita Diferida | EN: Deferred Write Execution
             if (write_pipeline[7]) begin
-                eff_addr = {active_row[write_bank_pipe[7]], write_col_pipe[7][9:3]} & (DEPTH - 1);
+                eff_addr = {active_row[write_bank_pipe[7]], write_col_pipe[7][9:3]} & (DEPTH - 8'd1);
                 for (b = 0; b < 8; b = b + 1) begin
                     if (!dm_in[b]) begin
                         case (write_bank_pipe[7])
@@ -140,7 +140,7 @@ module dram_bank_array #(
 
             // 4. PT: Execução de Leitura (Síncrona) | EN: Synchronous Read Execution
             if (rd_cmd && bank_active[bank_addr] && !timing_error) begin
-                eff_addr = {active_row[bank_addr], col_addr[9:3]} & (DEPTH - 1);
+                eff_addr = {active_row[bank_addr], col_addr[9:3]} & (DEPTH - 8'd1);
                 case (bank_addr)
                     3'd0: data_out <= bank0[eff_addr];
                     3'd1: data_out <= bank1[eff_addr];

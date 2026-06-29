@@ -20,7 +20,7 @@ module axi_tb;
     parameter NUM_TESTS = 1000; // Reduzido um pouco para o log ficar mais limpo. Pode voltar para 10000.
     
     // PT: Controle da profundidade da memória simulada (Deve ser igual ao ddr_mem.v)
-    parameter MEM_DEPTH_LOG2 = 8; 
+    parameter MEM_DEPTH_LOG2 = 2; 
     localparam DEPTH = 1 << MEM_DEPTH_LOG2;
     localparam TOTAL_POSITIONS = 8 * DEPTH; // 8 bancos * Profundidade
 
@@ -39,7 +39,7 @@ module axi_tb;
     // =========================================================================
     // Instanciação do Módulo (Device Under Test)
     // =========================================================================
-    subordinate_module #(.freq(FREQ)) dut (
+    subordinate_module dut (
         .ACLK(ACLK), .ARESETn(ARESETn), .clk(clk), .clk_90(clk_90), .rst_n(rst_n),
         .AWADDR(AWADDR), .AWVALID(AWVALID), .AWREADY(AWREADY),
         .WDATA(WDATA), .WSTRB(WSTRB), .WVALID(WVALID), .WREADY(WREADY),
@@ -48,12 +48,12 @@ module axi_tb;
         .RDATA(RDATA), .RRESP(RRESP), .RVALID(RVALID), .RREADY(RREADY)
     );
 
-    // =========================================================================
-    // Geração de Clocks
-    // =========================================================================
-    initial begin ACLK = 0; forever #5 ACLK = ~ACLK; end
-    initial begin clk = 0; forever #5 clk = ~clk; end
-    initial begin clk_90 = 0; #2.5; forever #5 clk_90 = ~clk_90; end
+	// =========================================================================
+	// Geração de Clocks (Alinhado ao SDC)
+	// =========================================================================
+	initial begin ACLK = 0; forever #10 ACLK = ~ACLK; end          // T = 10ns (100 MHz)
+	initial begin clk = 0; forever #20 clk = ~clk; end            // T = 20ns (50 MHz)
+	initial begin clk_90 = 0; #10; forever #20 clk_90 = ~clk_90; end // T = 20ns, Defasado 90° (5ns)
 
     // =========================================================================
     // Tasks de Transação AXI
@@ -61,6 +61,7 @@ module axi_tb;
     task axi_write(input [26:0] addr, input [15:0] data);
     begin
         @(posedge ACLK);
+		  #1;
         fork
             begin
                 AWADDR = addr; AWVALID = 1'b1;
@@ -78,11 +79,12 @@ module axi_tb;
     task axi_read(input [26:0] addr, output [15:0] data);
     begin
         @(posedge ACLK);
+		  #1;
         ARADDR = addr; ARVALID = 1'b1;
         wait(ARREADY); @(posedge ACLK); ARVALID = 1'b0;
         
         RREADY = 1'b1; wait(RVALID); data = RDATA;
-        @(posedge ACLK); RREADY = 1'b0;
+        @(posedge ACLK); #1; RREADY = 1'b0;
     end
     endtask
 

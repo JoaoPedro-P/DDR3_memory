@@ -60,6 +60,9 @@ module dram_bank_control #(
     
     wire [$clog2(freq) + 1 : 0] tRCD_timer [0:7];
     wire [$clog2(freq) + 1 : 0] tRP_timer [0:7]; 
+	 
+	 localparam [$clog2(freq) + 1 : 0] TRCD_VAL = T_RCD_CYCLES;
+    localparam [$clog2(freq) + 1 : 0] TRP_VAL  = T_RP_CYCLES;
     
     // =========================================================================
     // PT: 1. Lógica Combinacional: Flags e Erros | EN: 1. Combinational Logic
@@ -153,7 +156,7 @@ module dram_bank_control #(
             temp_param #(.freq(freq)) tRCD_counter (
                 .clk       (clk), 
                 .rst_n     (rst_n), 
-                .num_cicles(T_RCD_CYCLES), 
+                .num_cicles(TRCD_VAL), 
                 .start     (start_tRCD_timer[g]), 
                 .out       (tRCD_timer[g])
             );
@@ -161,7 +164,7 @@ module dram_bank_control #(
             temp_param #(.freq(freq)) tRP_counter (
                 .clk       (clk), 
                 .rst_n     (rst_n), 
-                .num_cicles(T_RP_CYCLES), 
+                .num_cicles(TRP_VAL), 
                 .start     (start_tRP_timer[g]), 
                 .out       (tRP_timer[g])
             );
