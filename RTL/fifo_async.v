@@ -94,8 +94,8 @@ module fifo_async #(
     // -------------------------------------------------------------------------
     // [PT] 3. Sincronizadores (Cross Domain) / [EN] 3. Synchronizers (Cross Domain)
     // -------------------------------------------------------------------------
-    (* ASYNC_REG = "TRUE" *) reg [ADDR_WIDTH:0] wr_ptr_gray_sync1, wr_ptr_gray_sync2;
-    (* ASYNC_REG = "TRUE" *) reg [ADDR_WIDTH:0] rd_ptr_gray_sync1, rd_ptr_gray_sync2;
+    reg [ADDR_WIDTH:0] wr_ptr_gray_sync1, wr_ptr_gray_sync2;
+    reg [ADDR_WIDTH:0] rd_ptr_gray_sync1, rd_ptr_gray_sync2;
 
     // [PT] Sincroniza ponteiro de leitura para o domínio de escrita / [EN] Synchronizes read pointer to write domain
     always @(posedge wr_clk or negedge wr_rst_n) begin
